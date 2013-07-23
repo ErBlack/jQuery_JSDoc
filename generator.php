@@ -1,17 +1,198 @@
 <?php
 $xml = new SimpleXMLElement('http://api.jquery.com/resources/api.xml', null, true);
+file_put_contents('test.js','');
+
+$methods = array();
 
 foreach ($xml->entries->entry as $entry) {
-    /* @var $entry SimpleXMLElement */
-    $attr = $entry->attributes();
-    switch ($attr['type']) {
-    	case 'method':
-    	    $description = array('/**');
-    	    $description[] = " * {$entry->desc}";
-     	    $description[] = " * @return {{$attr['return']}}";
-    	    $description[] = " */"; 
-    	    $description[] = "jQuery.prototype.{$attr['name']} = function(){}";
-    	    $description[] = PHP_EOL;
-    }
-    file_put_contents('test.js',print_r(implode(PHP_EOL, $description),true),FILE_APPEND);
+	/* @var $entry SimpleXMLElement */
+	$attr = $entry->attributes();
+	switch ($attr['type']) {
+		case 'method':
+			$Doc = new JSDocGenerator($entry);
+			$methods[(string)$attr['name']] = $Doc->render();
+	}
+}
+
+file_put_contents('test.js', implode(PHP_EOL, $methods), FILE_APPEND);
+
+class JSDocGenerator {
+	/**
+	 * Имя разрабтчика
+	 */
+	const AUTHOR = '@author';
+	/**
+	 * Маркирует функцию как конструктор
+	 */
+	const CONSTRUCTOR = '@constructor';
+	/**
+	 * Маркирует метод устаревшим и не рекомендуемым
+	 */
+	const DEPRECATED = '@deprecated';
+	/**
+	 * @see JSDocGenerator::THORWS
+	 */
+	const EXCEPTION = '@exception';
+	/**
+	 * Описывает аргумент функции; можно указать тип, задав его в фигурных скобках
+	 */
+	const PARAM = '@param';
+	/**
+	 * Означает, что метод приватный
+	 */
+	const PRIV = '@private';
+	/**
+	 * @see JSDocGenerator::RETURNS
+	 */
+	const RET = '@return';
+	/**
+	 * Описывает возвращаемое значение
+	 */
+	const RETURNS = '@returns';
+	/**
+	 * Описывает связь с другим объектом
+	 */
+	const SEE = '@see';
+	/**
+	 * Задает тип объекта, на который указывает ключевое слово «this» внутри функции
+	 */
+	const THIS = '@this';
+	/**
+	 * Описывает исключения, выбрасываемые методом
+	 */
+	const THROWS = '@throws';
+	/**
+	 * Версия библиотеки
+	 */
+	const VERSION = '@version';
+	const DOC_BEG = '/**';
+	const DOC_ITM = ' * ';
+	const DOC_END = ' */';
+	/**
+	 * xml
+	 * @var SimpleXMLElement
+	 */
+	protected $xml = null;
+	/**
+	 * Название метода
+	 * @var string
+	 */
+	public $name = '';
+	/**
+	 * Возвращаемое значение
+	 */
+	public $return = '';
+	/**
+	 * Описание метода
+	 * @var string
+	 */
+	public $description = '';
+	/**
+	 * Версия
+	 * @var string
+	 */
+	public $version = '';
+	/**
+	 * Аргументы
+	 * @var array
+	 */
+	public $arguments = array();
+	/**
+	 * Генератор описания метода
+	 * @param SimpleXMLElement $xml
+	*/
+	public function __construct($xml) {
+		$this->xml = $xml;
+		$this->parse();
+	}
+	/**
+	 * Разбирает xml на составляющие
+	 */
+	protected function parse() {
+		foreach ($this->xml->attributes() as $key => $value) {
+			if (isset($this->$key)) $this->$key = (string)$value;
+		}
+		
+		$this->name = str_replace('jQuery.', '', $this->name);
+
+		foreach ($this->xml as $key => $value) {
+			switch ($key) {
+				case 'desc': $this->description = (string)$value; break;
+				case 'signature': $signature = $value; break;
+			}
+		}
+		if (isset($signature)) {
+			foreach ($signature as $key => $value) {
+				
+				switch ($key) {
+					case 'added': $this->version = (string)$value; break;
+					case 'argument':
+						$this->parseArgument($value);
+						break;
+				}
+			}
+		}
+	}
+	/**
+	 * Разбирает аргумент
+	 * @param SimpleXMLElement $xml
+	 */
+	protected function parseArgument($xml) {
+		$attr = array();
+		foreach ($xml->attributes() as $key => $value) {
+			$attr[(string)$key] = (string)$value;
+		}
+		
+		if (!isset($attr['type'])) {
+			$attr['type'] = array();
+			
+			foreach ($xml as $key => $value) {
+				$type = $value->attributes();
+				if ($key == 'type') $attr['type'][] = (string)$type['name'];
+			}
+			
+			$attr['type'] = implode('|', $attr['type']);
+		}
+		
+		$attr['name'] = $this->normalizeArgument($attr['name']);
+
+		$this->arguments[$attr['name']] = $this::PARAM . " {{$attr['type']}} {$attr['name']} {$xml->desc}";
+	}
+	public function render() {
+		$doc = array();
+		$doc[] = $this->description;
+
+		if ($this->version) {
+			$doc[] = $this->version();
+		}
+
+		$doc += $this->arguments;
+
+		$doc[] = $this->returns();
+
+		$doc = $this::DOC_BEG . PHP_EOL . $this::DOC_ITM . implode(PHP_EOL . $this::DOC_ITM, $doc) . PHP_EOL . $this::DOC_END;
+
+		return  $doc . PHP_EOL . $this->method();
+
+	}
+	protected function method() {
+		$arguments = implode(', ', array_keys($this->arguments));
+		
+		return "jQuery.prototype.{$this->name} = function({$arguments}){}";
+	}
+	protected function returns() {
+		return $this::RETURNS . " {{$this->return}}";
+	}
+	protected function version() {
+		return $this::VERSION . " {$this->version}";
+	}
+	/**
+	 * Приводит имя аругмента в валидное состояние
+	 * @param string $string
+	 */
+	protected function normalizeArgument($string) {
+		$search = array('function', 'switch', ' ', '-');
+		$replace = array('foo', 'toggle', '', '');
+		return str_replace($search, $replace, preg_replace('/\\s*\\([^()]*\\)\\s*/', '', (string)$string));
+	}
 }
