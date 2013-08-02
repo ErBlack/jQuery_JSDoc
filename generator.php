@@ -1,6 +1,6 @@
 <?php
 $xml = new SimpleXMLElement('http://api.jquery.com/resources/api.xml', null, true);
-file_put_contents('test.js','');
+file_put_contents('generated.js', file_get_contents('head.js') . PHP_EOL);
 
 $methods = array();
 
@@ -14,7 +14,7 @@ foreach ($xml->entries->entry as $entry) {
 	}
 }
 
-file_put_contents('test.js', implode(PHP_EOL, $methods), FILE_APPEND);
+file_put_contents('generated.js', implode(PHP_EOL, $methods), FILE_APPEND);
 
 class JSDocGenerator {
 	/**
@@ -113,8 +113,6 @@ class JSDocGenerator {
 			if (isset($this->$key)) $this->$key = (string)$value;
 		}
 		
-		$this->name = str_replace('jQuery.', '', $this->name);
-
 		foreach ($this->xml as $key => $value) {
 			switch ($key) {
 				case 'desc': $this->description = (string)$value; break;
@@ -178,7 +176,9 @@ class JSDocGenerator {
 	protected function method() {
 		$arguments = implode(', ', array_keys($this->arguments));
 		
-		return "jQuery.prototype.{$this->name} = function({$arguments}){}";
+		$preffix = strpos($this->name, 'jQuery') !== 0 ?  'jQuery.prototype.' : '';
+		
+		return "{$preffix}{$this->name} = function({$arguments}){}";
 	}
 	protected function returns() {
 		return $this::RETURNS . " {{$this->return}}";
